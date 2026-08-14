@@ -13,35 +13,60 @@ except ImportError:
 
 # 1. Page Configuration
 st.set_page_config(
-    page_title="Vizard Custom Image Processor",
-    page_icon="✂️",
+    page_title="PC Case Gear Image Processor",
+    page_icon="🖥️",
     layout="wide"
 )
 
-# Custom Styling
+# Custom Styling with GPU Tech Background & Vibrant RGB Accents
 st.markdown("""
     <style>
+    /* App Background with Dark Semi-Transparent GPU Wallpaper Overlay */
     .stApp {
-        background-color: #0F172A;
+        background: 
+            linear-gradient(rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.94)),
+            url("https://images.unsplash.com/photo-1587202372775-e229f172b9d7?q=80&w=1920&auto=format&fit=crop");
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
         color: #F8FAFC;
     }
+    
+    /* Neon Glow Main Title */
     .main-title {
         text-align: center;
-        font-size: 2.2rem;
-        font-weight: 800;
-        color: #38BDF8;
-        margin-bottom: 20px;
+        font-size: 2.5rem;
+        font-weight: 900;
+        background: linear-gradient(90deg, #38BDF8, #A855F7, #EC4899);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 25px;
+        text-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
     }
+
+    /* Vibrant Glassmorphism Card Containers */
     div[data-testid="stBlock"] {
-        background-color: rgba(30, 41, 59, 0.7);
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background-color: rgba(30, 41, 59, 0.75);
+        backdrop-filter: blur(8px);
+        padding: 22px;
+        border-radius: 14px;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Tab Highlights */
+    button[data-baseweb="tab"] {
+        font-weight: 700 !important;
+        border-radius: 8px !important;
+    }
+    button[aria-selected="true"] {
+        background: linear-gradient(90deg, #38BDF8, #8B5CF6) !important;
+        color: #FFFFFF !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title">✂️ Custom 960px Image Processor & Batch Namer</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title">🖥️ PC Case Gear Image Processor</h1>', unsafe_allow_html=True)
 
 # Helper function to resize without warping (Proportional Scaling + Padding)
 def fit_image_without_distortion(img, target_width=960, min_height=300, max_height=500, bg_color=(255, 255, 255)):
