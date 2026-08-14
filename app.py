@@ -32,10 +32,35 @@ st.markdown("""
         border-radius: 12px;
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
+    
+    /* Overlay CSS container for transparent canvas */
+    .canvas-overlay-container {
+        position: relative;
+        display: inline-block;
+        width: 100%;
+    }
+    .canvas-overlay-container img {
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 1;
+        pointer-events: none;
+    }
+    .canvas-overlay-container iframe {
+        position: relative;
+        z-index: 2;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
+
+# Helper function to convert PIL Image to Base64
+def image_to_base64_url(img):
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
 
 # Helper function to load image from URL or Base64
 def load_image_from_input(pasted_str):
@@ -138,11 +163,11 @@ if img_input is not None:
             )
 
     # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH (NO BACKGROUND BUG)
+    # MODE 2: WHITE ERASER BRUSH (CSS OVERLAY FIX)
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
-        st.caption("Draw white brush strokes on the canvas pad below to erase/cover areas on your image.")
+        st.caption("Paint directly over the image using the white brush. Adjust brush size using the slider.")
 
         e_col1, e_col2 = st.columns([1.2, 1])
 
@@ -153,21 +178,31 @@ if img_input is not None:
             w_percent = (canvas_width / float(img_input.size[0]))
             h_size = int((float(img_input.size[1]) * float(w_percent)))
             resized_for_canvas = img_input.resize((canvas_width, h_size), Image.Resampling.LANCZOS)
+            
+            # Convert image to base64 URL for CSS rendering
+            bg_data_url = image_to_base64_url(resized_for_canvas)
 
-            # Display Reference Image above drawing pad
-            st.image(resized_for_canvas, caption="Reference Image for Drawing", use_container_width=True)
+            # Render image via HTML with transparent canvas overlay
+            st.markdown(
+                f'''
+                <div style="position: relative; width: {canvas_width}px; height: {h_size}px; margin-bottom: 10px;">
+                    <img src="{bg_data_url}" style="position: absolute; top:0; left:0; width: {canvas_width}px; height: {h_size}px; pointer-events: none; border-radius: 8px;" />
+                </div>
+                ''',
+                unsafe_allow_html=True
+            )
 
-            # CRASH-PROOF: Do NOT pass background_image or background_image_url to st_canvas
+            # Transparent canvas directly accepting mouse input
             canvas_result = st_canvas(
                 fill_color="rgba(255, 255, 255, 1.0)",
                 stroke_width=eraser_size,
                 stroke_color="#FFFFFF",
-                background_color="#000000",
+                background_color="rgba(0, 0, 0, 0.0)",  # 100% Transparent
                 update_streamlit=True,
                 height=h_size,
                 width=canvas_width,
                 drawing_mode="freedraw",
-                key="white_eraser_canvas_clean",
+                key="white_eraser_canvas_overlay",
             )
 
         with e_col2:
