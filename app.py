@@ -1,9 +1,9 @@
 import streamlit as st
 from PIL import Image, ImageOps
-from streamlit_drawable_canvas import st_canvas
 import io
 import base64
 import requests
+import streamlit.components.v1 as components
 
 # 1. Page Configuration
 st.set_page_config(
@@ -38,10 +38,8 @@ st.markdown("""
 st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
 
 # Helper function to convert PIL Image to Base64 Data URL
-# This is CRITICAL for bypassing streamlit-drawable-canvas bugs.
 def image_to_base64_url(img):
     buffered = io.BytesIO()
-    # We must use PNG for background images in the canvas component
     img.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
     return f"data:image/png;base64,{img_str}"
@@ -49,7 +47,6 @@ def image_to_base64_url(img):
 # Helper function to load image from URL or Base64
 def load_image_from_input(pasted_str):
     pasted_str = pasted_str.strip()
-    # 1. Base64 Data URL
     if pasted_str.startswith("data:image"):
         try:
             base64_str = pasted_str.split(",")[1]
@@ -58,7 +55,6 @@ def load_image_from_input(pasted_str):
         except Exception as e:
             st.error(f"Error decoding Base64 image: {e}")
             return None
-    # 2. Web URL (http/https)
     elif pasted_str.startswith("http://") or pasted_str.startswith("https://"):
         try:
             response = requests.get(pasted_str, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
@@ -114,24 +110,17 @@ if img_input is not None:
         
         col_controls, col_preview = st.columns([1, 1.2])
 
-        # Calculate optimal target height (300px - 500px) based on original image ratio
         orig_w, orig_h = img_input.size
         orig_aspect_ratio = orig_w / float(orig_h)
-
-        # Theoretical ideal height at 960px width
         ideal_height = 960 / orig_aspect_ratio
-        
-        # Clamp height within [300, 500]
         optimal_height = int(max(300, min(500, round(ideal_height))))
 
         with col_controls:
             st.info(f"📏 **Original Size:** {orig_w} x {orig_h} px")
             st.success(f"🎯 **Auto-Calculated Output:** 960 x {optimal_height} px")
 
-            # Option to manually tweak alignment (Default is 0.5 center)
             centering_y = st.slider("Vertical Alignment Shift (Top ↔ Bottom):", 0.0, 1.0, 0.5, 0.05)
 
-            # Auto-Fit execution using PIL ImageOps
             auto_fit_img = ImageOps.fit(
                 img_input,
                 (960, optimal_height),
@@ -142,7 +131,6 @@ if img_input is not None:
         with col_preview:
             st.image(auto_fit_img, caption=f"Auto-Fit Result: 960 x {optimal_height} px", use_container_width=True)
 
-            # Download Setup
             buf = io.BytesIO()
             save_img = auto_fit_img.convert("RGB") if auto_fit_img.mode in ("RGBA", "P") else auto_fit_img
             save_img.save(buf, format="JPEG", quality=95)
@@ -157,69 +145,143 @@ if img_input is not None:
             )
 
     # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH (IMAGE AS CANVAS FIX)
+    # MODE 2: WHITE ERASER BRUSH (HTML5 CANVAS - NO CRASHES)
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
-        st.caption("Paint directly over your image using the white brush. Adjust brush size using the slider.")
+        st.caption("Paint directly over the image using the white brush. Adjust brush size using the slider.")
 
         e_col1, e_col2 = st.columns([1.2, 1])
 
         with e_col1:
             eraser_size = st.slider("White Eraser Brush Size (px):", min_value=5, max_value=100, value=25, step=5)
 
-            # Define canvas dimensions based on image aspect ratio
             canvas_width = 700
             w_percent = (canvas_width / float(img_input.size[0]))
             h_size = int((float(img_input.size[1]) * float(w_percent)))
-            
-            # 1. Resize original image to fit canvas cleanly
             resized_for_canvas = img_input.resize((canvas_width, h_size), Image.Resampling.LANCZOS)
-            
-            # 2. Convert resized PIL image to Base64 Data URL string
-            # This is the standard way to feed images to web components without server-side processing.
             bg_data_url = image_to_base64_url(resized_for_canvas)
 
-            st.write(f"✍️ **Drawing Pad ({canvas_width}x{h_size} px):**")
+            # Native HTML5 Canvas component that renders image natively and enables white brush
+            html_code = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{ margin: 0; padding: 0; background-color: transparent; font-family: sans-serif; color: white; }}
+                    #canvas-container {{ position: relative; width: {canvas_width}px; height: {h_size}px; cursor: crosshair; }}
+                    canvas {{ border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }}
+                    .btn-container {{ margin-top: 10px; display: flex; gap: 10px; }}
+                    button {{
+                        background-color: #38BDF8; color: #0F172A; border: none; padding: 8px 16px;
+                        font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s;
+                    }}
+                    button:hover {{ background-color: #0284C7; color: white; }}
+                    button.clear {{ background-color: #EF4444; color: white; }}
+                    button.clear:hover {{ background-color: #DC2626; }}
+                </style>
+            </head>
+            <body>
+                <div id="canvas-container">
+                    <canvas id="eraserCanvas" width="{canvas_width}" height="{h_size}"></canvas>
+                </div>
+                <div class="btn-container">
+                    <button id="saveBtn">💾 Apply Changes</button>
+                    <button id="clearBtn" class="clear">🔄 Reset Canvas</button>
+                </div>
 
-            # 3. Interactive Canvas Component
-            # DO NOT pass 'background_image' (PIL object). This causes the AttributeError.
-            # Instead, pass 'background_image_url' (Base64 string).
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 255, 255, 1.0)",
-                stroke_width=eraser_size,
-                stroke_color="#FFFFFF", # White Brush
-                background_color="", # Leave empty for transparent background handling
-                background_image_url=bg_data_url, # Pass Base64 string directly
-                update_streamlit=True,
-                height=h_size,
-                width=canvas_width,
-                drawing_mode="freedraw",
-                key="white_eraser_canvas_final_fix",
-            )
+                <script>
+                    const canvas = document.getElementById('eraserCanvas');
+                    const ctx = canvas.getContext('2d');
+                    const img = new Image();
+                    img.src = "{bg_data_url}";
+
+                    let isDrawing = false;
+                    let brushSize = {eraser_size};
+
+                    img.onload = () => {{
+                        ctx.drawImage(img, 0, 0, {canvas_width}, {h_size});
+                    }};
+
+                    function getPos(e) {{
+                        const rect = canvas.getBoundingClientRect();
+                        return {{
+                            x: e.clientX - rect.left,
+                            y: e.clientY - rect.top
+                        }};
+                    }}
+
+                    function startDrawing(e) {{
+                        isDrawing = true;
+                        draw(e);
+                    }}
+
+                    function stopDrawing() {{
+                        isDrawing = false;
+                        ctx.beginPath();
+                    }}
+
+                    function draw(e) {{
+                        if (!isDrawing) return;
+                        const pos = getPos(e);
+                        ctx.lineWidth = brushSize;
+                        ctx.lineCap = 'round';
+                        ctx.strokeStyle = '#FFFFFF';
+
+                        ctx.lineTo(pos.x, pos.y);
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(pos.x, pos.y);
+                    }}
+
+                    canvas.addEventListener('mousedown', startDrawing);
+                    canvas.addEventListener('mousemove', draw);
+                    canvas.addEventListener('mouseup', stopDrawing);
+                    canvas.addEventListener('mouseleave', stopDrawing);
+
+                    document.getElementById('clearBtn').onclick = () => {{
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0, {canvas_width}, {h_size});
+                    }};
+
+                    document.getElementById('saveBtn').onclick = () => {{
+                        const dataUrl = canvas.toDataURL('image/png');
+                        window.parent.postMessage({{
+                            type: 'streamlit:setComponentValue',
+                            value: dataUrl
+                        }}, '*');
+                    }};
+                </script>
+            </body>
+            </html>
+            """
+
+            # Render HTML Canvas (Height accommodates canvas + controls)
+            canvas_result_data = components.html(html_code, height=h_size + 60)
 
         with e_col2:
             st.subheader("🖼️ Output Image")
-            if canvas_result.image_data is not None:
-                # Extract white strokes drawn on the canvas (ignore canvas background)
-                canvas_img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
-                
-                # Combine original base image and white eraser layer
-                base_img = resized_for_canvas.convert("RGBA")
-                erased_final = Image.alpha_composite(base_img, canvas_img)
+            
+            # Allow image processing from canvas output or original fallback
+            if canvas_result_data:
+                try:
+                    base64_result = canvas_result_data.split(",")[1]
+                    erased_final = Image.open(io.BytesIO(base64.b64decode(base64_result)))
+                    st.image(erased_final, caption="Erased Output Preview", use_container_width=True)
 
-                st.image(erased_final, caption="Erased Output Preview", use_container_width=True)
+                    buf_e = io.BytesIO()
+                    erased_final.convert("RGB").save(buf_e, format="JPEG", quality=95)
 
-                # Buffer Download Setup
-                buf_e = io.BytesIO()
-                # Convert RGBA composite back to RGB for JPEG download
-                erased_final.convert("RGB").save(buf_e, format="JPEG", quality=95)
-
-                st.download_button(
-                    label="📥 Download Erased Image",
-                    data=buf_e.getvalue(),
-                    file_name="erased_image.jpg",
-                    mime="image/jpeg",
-                    type="primary",
-                    use_container_width=True
-                )
+                    st.download_button(
+                        label="📥 Download Erased Image",
+                        data=buf_e.getvalue(),
+                        file_name="erased_image.jpg",
+                        mime="image/jpeg",
+                        type="primary",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.image(resized_for_canvas, caption="Paint over the image and click 'Apply Changes'", use_container_width=True)
+            else:
+                st.info("👈 Paint over the image using the white brush on the left, then click **💾 Apply Changes** to see the preview & download.")
+                st.image(resized_for_canvas, caption="Original Image Preview", use_container_width=True)
