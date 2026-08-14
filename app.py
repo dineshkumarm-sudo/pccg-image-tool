@@ -37,7 +37,7 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
 
-# Helper function to convert PIL Image to Base64 (fixes streamlit-drawable-canvas bug)
+# Helper function to convert PIL Image to Base64 (Bypasses Streamlit's missing image_to_url)
 def image_to_base64(img):
     buffered = io.BytesIO()
     img.save(buffered, format="PNG")
@@ -47,7 +47,6 @@ def image_to_base64(img):
 # Helper function to load image from URL or Base64
 def load_image_from_input(pasted_str):
     pasted_str = pasted_str.strip()
-    # 1. Base64 Data URL
     if pasted_str.startswith("data:image"):
         try:
             base64_str = pasted_str.split(",")[1]
@@ -56,7 +55,6 @@ def load_image_from_input(pasted_str):
         except Exception as e:
             st.error(f"Error decoding Base64 image: {e}")
             return None
-    # 2. Web URL (http/https)
     elif pasted_str.startswith("http://") or pasted_str.startswith("https://"):
         try:
             response = requests.get(pasted_str, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
@@ -94,7 +92,6 @@ with tab2:
 if img_input is not None:
     st.markdown("---")
     
-    # Tool Selection Mode (Manual Interactive Crop Removed)
     mode = st.radio(
         "🛠️ Choose Processing Tool:", 
         [
@@ -113,24 +110,17 @@ if img_input is not None:
         
         col_controls, col_preview = st.columns([1, 1.2])
 
-        # Calculate optimal target height (300px - 500px) based on original image ratio
         orig_w, orig_h = img_input.size
         orig_aspect_ratio = orig_w / float(orig_h)
-
-        # Theoretical ideal height at 960px width
         ideal_height = 960 / orig_aspect_ratio
-        
-        # Clamp height within [300, 500]
         optimal_height = int(max(300, min(500, round(ideal_height))))
 
         with col_controls:
             st.info(f"📏 **Original Size:** {orig_w} x {orig_h} px")
             st.success(f"🎯 **Auto-Calculated Output:** 960 x {optimal_height} px")
 
-            # Option to manually tweak alignment (Default is 0.5 center)
             centering_y = st.slider("Vertical Alignment Shift (Top ↔ Bottom):", 0.0, 1.0, 0.5, 0.05)
 
-            # Auto-Fit execution using PIL ImageOps
             auto_fit_img = ImageOps.fit(
                 img_input,
                 (960, optimal_height),
@@ -141,7 +131,6 @@ if img_input is not None:
         with col_preview:
             st.image(auto_fit_img, caption=f"Auto-Fit Result: 960 x {optimal_height} px", use_container_width=True)
 
-            # Download Setup
             buf = io.BytesIO()
             save_img = auto_fit_img.convert("RGB") if auto_fit_img.mode in ("RGBA", "P") else auto_fit_img
             save_img.save(buf, format="JPEG", quality=95)
@@ -156,7 +145,7 @@ if img_input is not None:
             )
 
     # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH
+    # MODE 2: WHITE ERASER BRUSH (FIXED)
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
@@ -172,14 +161,16 @@ if img_input is not None:
             h_size = int((float(img_input.size[1]) * float(w_percent)))
             resized_for_canvas = img_input.resize((canvas_width, h_size), Image.Resampling.LANCZOS)
 
-            # FIX: Convert image to PIL object safely without relying on deprecated Streamlit internal utilities
-            bg_data_url = image_to_base64(resized_for_canvas)
+            # CRITICAL FIX: Convert PIL image to PIL-Image wrapped in base64 string
+            # to avoid calling st_image.image_to_url internal function
+            bg_base64 = image_to_base64(resized_for_canvas)
 
+            # Pass background_image as a converted PIL image safely
             canvas_result = st_canvas(
                 fill_color="rgba(255, 255, 255, 1.0)",
                 stroke_width=eraser_size,
                 stroke_color="#FFFFFF",
-                background_image=resized_for_canvas,
+                background_image=Image.open(io.BytesIO(base64.b64decode(bg_base64.split(",")[1]))),
                 update_streamlit=True,
                 height=h_size,
                 width=canvas_width,
