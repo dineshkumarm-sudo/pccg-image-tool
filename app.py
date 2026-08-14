@@ -3,7 +3,6 @@ from PIL import Image
 import io
 import base64
 import requests
-import streamlit.components.v1 as components
 
 # Import Clipboard Paste Button
 try:
@@ -42,20 +41,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
-
-# Helper function to convert PIL Image to Base64 Data URL (JPEG format)
-def image_to_base64_url(img):
-    buffered = io.BytesIO()
-    if img.mode in ("RGBA", "P"):
-        rgb_img = Image.new("RGB", img.size, (255, 255, 255))
-        rgb_img.paste(img, mask=img.split()[3] if img.mode == "RGBA" else None)
-        rgb_img.save(buffered, format="JPEG", quality=95, subsampling=0)
-    else:
-        img.save(buffered, format="JPEG", quality=95, subsampling=0)
-        
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/jpeg;base64,{img_str}"
+st.markdown('<h1 class="main-title">✂️ Custom 960px Image Processor & Batch Namer</h1>', unsafe_allow_html=True)
 
 # Helper function to resize without warping (Proportional Scaling + Padding)
 def fit_image_without_distortion(img, target_width=960, min_height=300, max_height=500, bg_color=(255, 255, 255)):
@@ -93,14 +79,15 @@ def fit_image_without_distortion(img, target_width=960, min_height=300, max_heig
 # Helper function to load image from URL or Base64 String
 def load_image_from_input(pasted_str):
     pasted_str = pasted_str.strip()
-    
+    if not pasted_str:
+        return None
+        
     if pasted_str.startswith("data:image"):
         try:
             base64_str = pasted_str.split(",")[1]
             image_bytes = base64.b64decode(base64_str)
             return Image.open(io.BytesIO(image_bytes))
-        except Exception as e:
-            st.error(f"Error decoding Base64 image: {e}")
+        except Exception:
             return None
             
     elif pasted_str.startswith("http://") or pasted_str.startswith("https://"):
@@ -121,23 +108,137 @@ def load_image_from_input(pasted_str):
             
             return Image.open(io.BytesIO(response.content))
             
-        except Exception as e:
-            st.error(f"Error fetching image: {e}")
+        except Exception:
             return None
             
     else:
-        st.warning("Please paste a valid Image Web URL (http/https) or Base64 image data.")
         return None
 
-# 2. Input Source Selection
-st.subheader("1. Select Image Input Method")
-tab1, tab2, tab3 = st.tabs(["📋 Paste Direct Image (Clipboard)", "📁 File Upload", "🔗 URL / Base64 Text"])
+# Background Padding Color
+bg_choice = st.radio(
+    "🎨 Background Padding Color (to prevent warping):", 
+    ["White", "Black"], 
+    horizontal=True
+)
+padding_color = (255, 255, 255) if bg_choice == "White" else (0, 0, 0)
 
-img_input = None
+st.markdown("---")
 
+# Input Source Selection
+tab1, tab2, tab3 = st.tabs(["📁 Multi-File Upload (7 Rows)", "🔗 Multi-URL / Base64 (7 Rows)", "📋 Clipboard Paste (Single)"])
+
+# -------------------------------------------------------------
+# TAB 1: MULTI-FILE UPLOAD (7 ROWS WITH FILENAMES)
+# -------------------------------------------------------------
 with tab1:
+    st.subheader("📁 Upload up to 7 Images with Custom File Names")
+    
+    file_items = []
+    
+    for i in range(1, 8):
+        col_img, col_name = st.columns([1.5, 1])
+        
+        with col_img:
+            uploaded_file = st.file_uploader(f"Row {i}: Upload Image", type=["jpg", "jpeg", "png", "webp"], key=f"file_upload_{i}")
+        
+        with col_name:
+            custom_name = st.text_input(f"Row {i}: Custom Image Name", value=f"image_{i}", key=f"file_name_{i}")
+            
+        if uploaded_file is not None:
+            try:
+                img_obj = Image.open(uploaded_file)
+                file_items.append((img_obj, custom_name))
+            except Exception as e:
+                st.error(f"Row {i} Error: {e}")
+
+    if file_items:
+        st.markdown("---")
+        st.subheader("⚡ Processed Results")
+        
+        for idx, (img, name) in enumerate(file_items, 1):
+            proc_img, final_h = fit_image_without_distortion(
+                img, target_width=960, min_height=300, max_height=500, bg_color=padding_color
+            )
+            
+            clean_name = name.strip() if name.strip() else f"image_{idx}"
+            if not clean_name.lower().endswith(('.jpg', '.jpeg')):
+                clean_name += ".jpg"
+
+            col_p1, col_p2 = st.columns([1, 1.2])
+            with col_p1:
+                st.write(f"**Image {idx}:** `{clean_name}` ({proc_img.width}x{final_h}px)")
+                buf = io.BytesIO()
+                proc_img.save(buf, format="JPEG", quality=95, subsampling=0)
+                st.download_button(
+                    label=f"📥 Download {clean_name}",
+                    data=buf.getvalue(),
+                    file_name=clean_name,
+                    mime="image/jpeg",
+                    type="primary",
+                    key=f"dl_file_{idx}"
+                )
+            with col_p2:
+                st.image(proc_img, use_container_width=True)
+
+# -------------------------------------------------------------
+# TAB 2: MULTI-URL / BASE64 (7 ROWS WITH FILENAMES)
+# -------------------------------------------------------------
+with tab2:
+    st.subheader("🔗 Paste up to 7 Image URLs or Base64 Strings with Custom File Names")
+    
+    url_items = []
+    
+    for i in range(1, 8):
+        col_url, col_name = st.columns([1.5, 1])
+        
+        with col_url:
+            pasted_url = st.text_input(f"Row {i}: Image URL / Base64", placeholder="https://example.com/image.jpg", key=f"url_input_{i}")
+            
+        with col_name:
+            custom_name = st.text_input(f"Row {i}: Custom Image Name", value=f"image_{i}", key=f"url_name_{i}")
+            
+        if pasted_url:
+            img_obj = load_image_from_input(pasted_url)
+            if img_obj:
+                url_items.append((img_obj, custom_name))
+            else:
+                st.warning(f"Row {i}: Could not load image from URL/Base64. Check the link.")
+
+    if url_items:
+        st.markdown("---")
+        st.subheader("⚡ Processed Results")
+        
+        for idx, (img, name) in enumerate(url_items, 1):
+            proc_img, final_h = fit_image_without_distortion(
+                img, target_width=960, min_height=300, max_height=500, bg_color=padding_color
+            )
+            
+            clean_name = name.strip() if name.strip() else f"image_{idx}"
+            if not clean_name.lower().endswith(('.jpg', '.jpeg')):
+                clean_name += ".jpg"
+
+            col_p1, col_p2 = st.columns([1, 1.2])
+            with col_p1:
+                st.write(f"**Image {idx}:** `{clean_name}` ({proc_img.width}x{final_h}px)")
+                buf = io.BytesIO()
+                proc_img.save(buf, format="JPEG", quality=95, subsampling=0)
+                st.download_button(
+                    label=f"📥 Download {clean_name}",
+                    data=buf.getvalue(),
+                    file_name=clean_name,
+                    mime="image/jpeg",
+                    type="primary",
+                    key=f"dl_url_{idx}"
+                )
+            with col_p2:
+                st.image(proc_img, use_container_width=True)
+
+# -------------------------------------------------------------
+# TAB 3: CLIPBOARD PASTE
+# -------------------------------------------------------------
+with tab3:
+    st.subheader("📋 Clipboard Single Image Paste")
     if PASTE_BUTTON_AVAILABLE:
-        st.write("Copy an image from anywhere (Right-Click → Copy Image or PrintScreen) and click below:")
         paste_result = pbutton(
             label="📋 Paste Image from Clipboard",
             text_color="#0F172A",
@@ -146,226 +247,24 @@ with tab1:
             errors="raise"
         )
         if paste_result.image_data is not None:
-            img_input = paste_result.image_data
-    else:
-        st.warning("The `streamlit-paste-button` library is installing. Please refresh in a few seconds.")
-
-with tab2:
-    uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp"])
-    if uploaded_file:
-        img_input = Image.open(uploaded_file)
-
-with tab3:
-    pasted_data = st.text_input("Paste Image URL or Base64 Data here:", key="clipboard_text_input")
-    if pasted_data:
-        img_input = load_image_from_input(pasted_data)
-
-if img_input is not None:
-    st.markdown("---")
-    
-    bg_choice = st.radio(
-        "🎨 Background Padding Color (for aspect ratio matching):", 
-        ["White", "Black"], 
-        horizontal=True
-    )
-    padding_color = (255, 255, 255) if bg_choice == "White" else (0, 0, 0)
-
-    mode = st.radio(
-        "🛠️ Choose Processing Tool:", 
-        ["⚡ 1-Click Auto-Fit (No Distortion)", "🧹 White Eraser Brush"], 
-        horizontal=True
-    )
-
-    # -------------------------------------------------------------
-    # MODE 1: AUTO-FIT MODE (NO WARP, NO CROP)
-    # -------------------------------------------------------------
-    if "1-Click Auto-Fit" in mode:
-        st.subheader("⚡ Un-warped Auto-Fit")
-        st.caption("Preserves 100% of original image proportions centered on a 960px canvas without stretching or cropping.")
-        
-        col_controls, col_preview = st.columns([1, 1.2])
-
-        orig_w, orig_h = img_input.size
-        auto_fit_img, final_h = fit_image_without_distortion(
-            img_input, target_width=960, min_height=300, max_height=500, bg_color=padding_color
-        )
-
-        with col_controls:
-            st.info(f"📏 **Original Size:** {orig_w} x {orig_h} px")
-            st.success(f"🎯 **Canvas Size:** 960 x {final_h} px (JPEG)")
-
-        with col_preview:
-            st.image(auto_fit_img, caption=f"Un-warped Output: 960 x {final_h} px", use_container_width=True)
-
-            buf = io.BytesIO()
-            auto_fit_img.save(buf, format="JPEG", quality=95, subsampling=0)
-            
-            st.download_button(
-                label=f"📥 Download 960 x {final_h} px JPEG Image",
-                data=buf.getvalue(),
-                file_name=f"unwarped_960x{final_h}.jpg",
-                mime="image/jpeg",
-                type="primary",
-                use_container_width=True
+            col_c1, col_c2 = st.columns([1, 1.2])
+            proc_img, final_h = fit_image_without_distortion(
+                paste_result.image_data, target_width=960, min_height=300, max_height=500, bg_color=padding_color
             )
-
-    # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH (NO WARP)
-    # -------------------------------------------------------------
+            with col_c1:
+                clip_name = st.text_input("Download Image Name:", value="clipboard_image.jpg")
+                if not clip_name.lower().endswith(('.jpg', '.jpeg')):
+                    clip_name += ".jpg"
+                buf = io.BytesIO()
+                proc_img.save(buf, format="JPEG", quality=95, subsampling=0)
+                st.download_button(
+                    label=f"📥 Download {clip_name}",
+                    data=buf.getvalue(),
+                    file_name=clip_name,
+                    mime="image/jpeg",
+                    type="primary"
+                )
+            with col_c2:
+                st.image(proc_img, use_container_width=True)
     else:
-        st.subheader("🧹 White Eraser Tool")
-        st.caption("Paint directly over the un-warped image. Exports directly as 960px JPEG.")
-
-        export_base_img, final_h = fit_image_without_distortion(
-            img_input, target_width=960, min_height=300, max_height=500, bg_color=padding_color
-        )
-
-        e_col1, e_col2 = st.columns([1.2, 1])
-
-        with e_col1:
-            eraser_size = st.slider("White Eraser Brush Size (px):", min_value=5, max_value=100, value=25, step=5)
-
-            canvas_width = 700
-            scale_ratio = canvas_width / 960.0
-            canvas_height = int(final_h * scale_ratio)
-            
-            resized_for_canvas = export_base_img.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
-            
-            bg_data_url_display = image_to_base64_url(resized_for_canvas)
-            bg_data_url_export = image_to_base64_url(export_base_img)
-
-            html_code = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body {{ margin: 0; padding: 0; background-color: transparent; font-family: sans-serif; color: white; }}
-                    #canvas-container {{ position: relative; width: {canvas_width}px; height: {canvas_height}px; cursor: crosshair; }}
-                    canvas {{ border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }}
-                    .btn-container {{ margin-top: 12px; display: flex; gap: 10px; align-items: center; }}
-                    button {{
-                        background-color: #38BDF8; color: #0F172A; border: none; padding: 10px 18px;
-                        font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; font-size: 14px;
-                    }}
-                    button:hover {{ background-color: #0284C7; color: white; }}
-                    button.clear {{ background-color: #EF4444; color: white; }}
-                    button.clear:hover {{ background-color: #DC2626; }}
-                </style>
-            </head>
-            <body>
-                <div id="canvas-container">
-                    <canvas id="eraserCanvas" width="{canvas_width}" height="{canvas_height}"></canvas>
-                    <canvas id="exportCanvas" width="960" height="{final_h}" style="display:none;"></canvas>
-                </div>
-                <div class="btn-container">
-                    <button id="downloadBtn">📥 Download 960x{final_h}px JPEG Image</button>
-                    <button id="clearBtn" class="clear">🔄 Reset Canvas</button>
-                </div>
-
-                <script>
-                    const displayCanvas = document.getElementById('eraserCanvas');
-                    const displayCtx = displayCanvas.getContext('2d');
-                    const exportCanvas = document.getElementById('exportCanvas');
-                    const exportCtx = exportCanvas.getContext('2d');
-
-                    const displayImg = new Image();
-                    const exportImg = new Image();
-
-                    displayImg.src = "{bg_data_url_display}";
-                    exportImg.src = "{bg_data_url_export}";
-
-                    let isDrawing = false;
-                    let displayBrushSize = {eraser_size};
-                    let exportBrushSize = {eraser_size} * (960 / {canvas_width});
-
-                    let lastPos = null;
-
-                    displayImg.onload = () => {{ displayCtx.drawImage(displayImg, 0, 0, {canvas_width}, {canvas_height}); }};
-                    exportImg.onload = () => {{ exportCtx.drawImage(exportImg, 0, 0, 960, {final_h}); }};
-
-                    function getPos(e) {{
-                        const rect = displayCanvas.getBoundingClientRect();
-                        return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
-                    }}
-
-                    function startDrawing(e) {{
-                        isDrawing = true;
-                        const pos = getPos(e);
-                        lastPos = pos;
-                        draw(e);
-                    }}
-
-                    function stopDrawing() {{
-                        isDrawing = false;
-                        lastPos = null;
-                        displayCtx.beginPath();
-                        exportCtx.beginPath();
-                    }}
-
-                    function draw(e) {{
-                        if (!isDrawing) return;
-                        const pos = getPos(e);
-
-                        displayCtx.lineWidth = displayBrushSize;
-                        displayCtx.lineCap = 'round';
-                        displayCtx.lineJoin = 'round';
-                        displayCtx.strokeStyle = '#FFFFFF';
-
-                        displayCtx.beginPath();
-                        if (lastPos) displayCtx.moveTo(lastPos.x, lastPos.y);
-                        else displayCtx.moveTo(pos.x, pos.y);
-                        displayCtx.lineTo(pos.x, pos.y);
-                        displayCtx.stroke();
-
-                        const scale = 960 / {canvas_width};
-                        const expX = pos.x * scale;
-                        const expY = pos.y * scale;
-                        const expLastX = lastPos ? lastPos.x * scale : expX;
-                        const expLastY = lastPos ? lastPos.y * scale : expY;
-
-                        exportCtx.lineWidth = exportBrushSize;
-                        exportCtx.lineCap = 'round';
-                        exportCtx.lineJoin = 'round';
-                        exportCtx.strokeStyle = '#FFFFFF';
-
-                        exportCtx.beginPath();
-                        exportCtx.moveTo(expLastX, expLastY);
-                        exportCtx.lineTo(expX, expY);
-                        exportCtx.stroke();
-
-                        lastPos = pos;
-                    }}
-
-                    displayCanvas.addEventListener('mousedown', startDrawing);
-                    displayCanvas.addEventListener('mousemove', draw);
-                    displayCanvas.addEventListener('mouseup', stopDrawing);
-                    displayCanvas.addEventListener('mouseleave', stopDrawing);
-
-                    document.getElementById('clearBtn').onclick = () => {{
-                        displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
-                        displayCtx.drawImage(displayImg, 0, 0, {canvas_width}, {canvas_height});
-                        exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
-                        exportCtx.drawImage(exportImg, 0, 0, 960, {final_h});
-                    }};
-
-                    document.getElementById('downloadBtn').onclick = () => {{
-                        const link = document.createElement('a');
-                        link.download = 'erased_960x{final_h}.jpg';
-                        link.href = exportCanvas.toDataURL('image/jpeg', 0.95);
-                        link.click();
-                    }};
-                </script>
-            </body>
-            </html>
-            """
-
-            components.html(html_code, height=canvas_height + 70)
-
-        with e_col2:
-            st.subheader("📐 Target Specifications")
-            st.info(f"""
-            - **Width:** `960px` (Fixed)
-            - **Height:** `{final_h}px`
-            - **Proportions:** 100% Original (No Warping, No Cropping)
-            - **Format:** `.jpg` / `JPEG`
-            """)
+        st.warning("Clipboard paste plugin initializing...")
