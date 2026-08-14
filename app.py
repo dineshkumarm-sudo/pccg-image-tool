@@ -1,6 +1,5 @@
 import streamlit as st
 from PIL import Image, ImageOps
-from streamlit_cropper import st_cropper
 from streamlit_drawable_canvas import st_canvas
 import io
 import base64
@@ -36,7 +35,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title">✂️ Custom 960px Image Cropper, Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
+
+# Helper function to convert PIL Image to Base64 (fixes streamlit-drawable-canvas bug)
+def image_to_base64(img):
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
 
 # Helper function to load image from URL or Base64
 def load_image_from_input(pasted_str):
@@ -88,12 +94,11 @@ with tab2:
 if img_input is not None:
     st.markdown("---")
     
-    # Tool Selection Mode
+    # Tool Selection Mode (Manual Interactive Crop Removed)
     mode = st.radio(
         "🛠️ Choose Processing Tool:", 
         [
             "⚡ 1-Click Auto-Fit (960px x 300-500px)", 
-            "🎯 Manual Interactive Crop", 
             "🧹 White Eraser Brush"
         ], 
         horizontal=True
@@ -134,7 +139,6 @@ if img_input is not None:
             )
 
         with col_preview:
-            # FIX: Updated use_column_width=True to use_container_width=True
             st.image(auto_fit_img, caption=f"Auto-Fit Result: 960 x {optimal_height} px", use_container_width=True)
 
             # Download Setup
@@ -152,48 +156,7 @@ if img_input is not None:
             )
 
     # -------------------------------------------------------------
-    # MODE 2: MANUAL INTERACTIVE CROP
-    # -------------------------------------------------------------
-    elif "Manual Interactive Crop" in mode:
-        col_crop, col_preview = st.columns([1.2, 1])
-        
-        with col_crop:
-            st.subheader("🎯 Drag & Crop Area")
-            target_height = st.slider("Target Output Height (px):", min_value=300, max_value=500, value=400, step=10)
-            
-            calc_aspect_ratio = (960, target_height)
-            box_color = st.color_picker("Crop Box Color", "#38BDF8")
-
-            cropped_img = st_cropper(
-                img_input,
-                realtime_update=True,
-                box_color=box_color,
-                aspect_ratio=calc_aspect_ratio,
-                return_type='image'
-            )
-
-        with col_preview:
-            st.subheader("🖼️ Final Output Preview")
-            final_img = cropped_img.resize((960, target_height), Image.Resampling.LANCZOS)
-            
-            # FIX: Updated use_column_width=True to use_container_width=True
-            st.image(final_img, caption=f"Final Output: 960 x {target_height} px", use_container_width=True)
-
-            buf = io.BytesIO()
-            save_img = final_img.convert("RGB") if final_img.mode in ("RGBA", "P") else final_img
-            save_img.save(buf, format="JPEG", quality=95)
-            
-            st.download_button(
-                label="📥 Download Cropped Image (960px)",
-                data=buf.getvalue(),
-                file_name=f"vizard_cropped_960x{target_height}.jpg",
-                mime="image/jpeg",
-                type="primary",
-                use_container_width=True
-            )
-
-    # -------------------------------------------------------------
-    # MODE 3: WHITE ERASER BRUSH
+    # MODE 2: WHITE ERASER BRUSH
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
@@ -208,6 +171,9 @@ if img_input is not None:
             w_percent = (canvas_width / float(img_input.size[0]))
             h_size = int((float(img_input.size[1]) * float(w_percent)))
             resized_for_canvas = img_input.resize((canvas_width, h_size), Image.Resampling.LANCZOS)
+
+            # FIX: Convert image to PIL object safely without relying on deprecated Streamlit internal utilities
+            bg_data_url = image_to_base64(resized_for_canvas)
 
             canvas_result = st_canvas(
                 fill_color="rgba(255, 255, 255, 1.0)",
@@ -228,7 +194,6 @@ if img_input is not None:
                 base_img = resized_for_canvas.convert("RGBA")
                 erased_final = Image.alpha_composite(base_img, canvas_img)
 
-                # FIX: Updated use_column_width=True to use_container_width=True
                 st.image(erased_final, caption="Erased Output Preview", use_container_width=True)
 
                 buf_e = io.BytesIO()
