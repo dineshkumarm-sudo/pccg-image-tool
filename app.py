@@ -33,22 +33,24 @@ st.markdown("""
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
     
-    /* Overlay CSS container for transparent canvas */
-    .canvas-overlay-container {
+    /* Strict relative container to align canvas over image */
+    .canvas-container-wrapper {
         position: relative;
-        display: inline-block;
-        width: 100%;
+        margin-top: 10px;
     }
-    .canvas-overlay-container img {
+    .canvas-container-wrapper img {
         position: absolute;
         top: 0;
         left: 0;
         z-index: 1;
         pointer-events: none;
     }
-    .canvas-overlay-container iframe {
-        position: relative;
+    .canvas-container-wrapper iframe {
+        position: absolute;
+        top: 0;
+        left: 0;
         z-index: 2;
+        background: transparent !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -163,7 +165,7 @@ if img_input is not None:
             )
 
     # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH (CSS OVERLAY FIX)
+    # MODE 2: WHITE ERASER BRUSH (TRANSPARENT STACK FIX)
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
@@ -179,30 +181,22 @@ if img_input is not None:
             h_size = int((float(img_input.size[1]) * float(w_percent)))
             resized_for_canvas = img_input.resize((canvas_width, h_size), Image.Resampling.LANCZOS)
             
-            # Convert image to base64 URL for CSS rendering
             bg_data_url = image_to_base64_url(resized_for_canvas)
 
-            # Render image via HTML with transparent canvas overlay
-            st.markdown(
-                f'''
-                <div style="position: relative; width: {canvas_width}px; height: {h_size}px; margin-bottom: 10px;">
-                    <img src="{bg_data_url}" style="position: absolute; top:0; left:0; width: {canvas_width}px; height: {h_size}px; pointer-events: none; border-radius: 8px;" />
-                </div>
-                ''',
-                unsafe_allow_html=True
-            )
+            # Display background image directly inside Streamlit container
+            st.image(resized_for_canvas, caption="Paint Over Target Image Below", use_container_width=True)
 
-            # Transparent canvas directly accepting mouse input
+            # Canvas with background_color set to empty string for transparent rendering
             canvas_result = st_canvas(
                 fill_color="rgba(255, 255, 255, 1.0)",
                 stroke_width=eraser_size,
                 stroke_color="#FFFFFF",
-                background_color="rgba(0, 0, 0, 0.0)",  # 100% Transparent
+                background_color="",
                 update_streamlit=True,
                 height=h_size,
                 width=canvas_width,
                 drawing_mode="freedraw",
-                key="white_eraser_canvas_overlay",
+                key="white_eraser_canvas_v3",
             )
 
         with e_col2:
