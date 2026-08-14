@@ -4,6 +4,7 @@ from streamlit_cropper import st_cropper
 from streamlit_drawable_canvas import st_canvas
 import io
 import base64
+import requests
 
 # 1. Page Configuration
 st.set_page_config(
@@ -37,9 +38,34 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">✂️ Custom 960px Image Cropper, Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
 
+# Helper function to load image from URL or Base64
+def load_image_from_input(pasted_str):
+    pasted_str = pasted_str.strip()
+    # 1. Base64 Data URL
+    if pasted_str.startswith("data:image"):
+        try:
+            base64_str = pasted_str.split(",")[1]
+            image_bytes = base64.b64decode(base64_str)
+            return Image.open(io.BytesIO(image_bytes))
+        except Exception as e:
+            st.error(f"Error decoding Base64 image: {e}")
+            return None
+    # 2. Web URL (http/https)
+    elif pasted_str.startswith("http://") or pasted_str.startswith("https://"):
+        try:
+            response = requests.get(pasted_str, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+            response.raise_for_status()
+            return Image.open(io.BytesIO(response.content))
+        except Exception as e:
+            st.error(f"Failed to fetch image from URL: {e}")
+            return None
+    else:
+        st.warning("Please paste a valid Image Web URL (http/https) or Base64 image data.")
+        return None
+
 # 2. Input Source Selection
 st.subheader("1. Select Image Input Method")
-tab1, tab2 = st.tabs(["📁 File Upload", "📋 Paste from Clipboard"])
+tab1, tab2 = st.tabs(["📁 File Upload", "📋 Paste URL / Clipboard"])
 
 img_input = None
 
@@ -50,18 +76,14 @@ with tab1:
 
 with tab2:
     pasted_data = st.text_input(
-        "Paste Image Base64 string / Data URL here:", 
+        "Paste Image URL or Base64 Data here:", 
         key="clipboard_text_input", 
-        help="Copy an image to clipboard, then right-click and paste here."
+        placeholder="https://example.com/image.jpg or data:image/png;base64,...",
+        help="Paste a direct image link or copied base64 string."
     )
     
-    if pasted_data and pasted_data.startswith("data:image"):
-        try:
-            base64_str = pasted_data.split(",")[1]
-            image_bytes = base64.b64decode(base64_str)
-            img_input = Image.open(io.BytesIO(image_bytes))
-        except Exception as e:
-            st.error("Could not parse image from clipboard string.")
+    if pasted_data:
+        img_input = load_image_from_input(pasted_data)
 
 if img_input is not None:
     st.markdown("---")
@@ -112,7 +134,8 @@ if img_input is not None:
             )
 
         with col_preview:
-            st.image(auto_fit_img, caption=f"Auto-Fit Result: 960 x {optimal_height} px", use_column_width=True)
+            # FIX: Updated use_column_width=True to use_container_width=True
+            st.image(auto_fit_img, caption=f"Auto-Fit Result: 960 x {optimal_height} px", use_container_width=True)
 
             # Download Setup
             buf = io.BytesIO()
@@ -152,7 +175,9 @@ if img_input is not None:
         with col_preview:
             st.subheader("🖼️ Final Output Preview")
             final_img = cropped_img.resize((960, target_height), Image.Resampling.LANCZOS)
-            st.image(final_img, caption=f"Final Output: 960 x {target_height} px", use_column_width=True)
+            
+            # FIX: Updated use_column_width=True to use_container_width=True
+            st.image(final_img, caption=f"Final Output: 960 x {target_height} px", use_container_width=True)
 
             buf = io.BytesIO()
             save_img = final_img.convert("RGB") if final_img.mode in ("RGBA", "P") else final_img
@@ -203,7 +228,8 @@ if img_input is not None:
                 base_img = resized_for_canvas.convert("RGBA")
                 erased_final = Image.alpha_composite(base_img, canvas_img)
 
-                st.image(erased_final, caption="Erased Output Preview", use_column_width=True)
+                # FIX: Updated use_column_width=True to use_container_width=True
+                st.image(erased_final, caption="Erased Output Preview", use_container_width=True)
 
                 buf_e = io.BytesIO()
                 erased_final.convert("RGB").save(buf_e, format="JPEG", quality=95)
