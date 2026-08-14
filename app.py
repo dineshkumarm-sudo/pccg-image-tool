@@ -44,9 +44,11 @@ def image_to_base64_url(img):
     img_str = base64.b64encode(buffered.getvalue()).decode()
     return f"data:image/png;base64,{img_str}"
 
-# Helper function to load image from URL or Base64
+# Helper function to load image from URL or Base64 (Updated with Anti-403 Headers)
 def load_image_from_input(pasted_str):
     pasted_str = pasted_str.strip()
+    
+    # 1. Base64 Data URL
     if pasted_str.startswith("data:image"):
         try:
             base64_str = pasted_str.split(",")[1]
@@ -55,14 +57,43 @@ def load_image_from_input(pasted_str):
         except Exception as e:
             st.error(f"Error decoding Base64 image: {e}")
             return None
+            
+    # 2. Web URL (http/https)
     elif pasted_str.startswith("http://") or pasted_str.startswith("https://"):
         try:
-            response = requests.get(pasted_str, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+            # Extract base domain dynamically to use as Referer
+            from urllib.parse import urlparse
+            parsed_url = urlparse(pasted_str)
+            domain_referer = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+
+            # Full modern browser headers to bypass CDN / 403 blocks
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': domain_referer,
+                'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'cross-site',
+            }
+            
+            session = requests.Session()
+            response = session.get(pasted_str, headers=headers, timeout=12, allow_redirects=True)
             response.raise_for_status()
+            
             return Image.open(io.BytesIO(response.content))
-        except Exception as e:
-            st.error(f"Failed to fetch image from URL: {e}")
+            
+        except requests.exceptions.HTTPError as err:
+            st.error(f"Failed to fetch image from URL: {err}")
+            st.info("💡 **Tip:** If a site actively blocks direct requests, try downloading the image locally and uploading via the **📁 File Upload** tab, or copy & paste its Base64 code.")
             return None
+        except Exception as e:
+            st.error(f"Error fetching image: {e}")
+            return None
+            
     else:
         st.warning("Please paste a valid Image Web URL (http/https) or Base64 image data.")
         return None
