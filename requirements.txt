@@ -2,3 +2,7 @@ streamlit>=1.30.0
 Pillow>=10.0.0
 requests>=2.31.0
 streamlit-drawable-canvas>=0.9.3
+streamlit
+Pillow
+requests
+streamlit-paste-button
