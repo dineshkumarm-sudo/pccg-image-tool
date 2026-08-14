@@ -1,5 +1,5 @@
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image
 import io
 import base64
 import requests
@@ -44,12 +44,19 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
 
-# Helper function to convert PIL Image to Base64 Data URL
+# Helper function to convert PIL Image to Base64 Data URL (JPEG format)
 def image_to_base64_url(img):
     buffered = io.BytesIO()
-    img.save(buffered, format="PNG")
+    # Convert RGBA/P mode to RGB before saving as JPEG
+    if img.mode in ("RGBA", "P"):
+        rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+        rgb_img.paste(img, mask=img.split()[3] if img.mode == "RGBA" else None)
+        rgb_img.save(buffered, format="JPEG", quality=95, subsampling=0)
+    else:
+        img.save(buffered, format="JPEG", quality=95, subsampling=0)
+        
     img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
+    return f"data:image/jpeg;base64,{img_str}"
 
 # Helper function to load image from URL or Base64 String
 def load_image_from_input(pasted_str):
@@ -154,11 +161,11 @@ if img_input is not None:
     )
 
     # -------------------------------------------------------------
-    # MODE 1: 1-CLICK AUTO-FIT MODE
+    # MODE 1: 1-CLICK AUTO-FIT MODE (NO CROP, HIGH QUALITY RESIZE)
     # -------------------------------------------------------------
     if "1-Click Auto-Fit" in mode:
-        st.subheader("⚡ 1-Click Auto-Fit Center Crop")
-        st.caption("Automatically calculates the closest aspect ratio to fit height between 300px and 500px at 960px width with minimal cropping.")
+        st.subheader("⚡ 1-Click Auto-Fit Stretch/Resize (No Cropping)")
+        st.caption("Resizes the entire image to 960px width with an optimal height (300px–500px). Zero cropping guaranteed!")
         
         col_controls, col_preview = st.columns([1, 1.2])
 
@@ -169,50 +176,52 @@ if img_input is not None:
 
         with col_controls:
             st.info(f"📏 **Original Size:** {orig_w} x {orig_h} px")
-            st.success(f"🎯 **Auto-Calculated Output:** 960 x {optimal_height} px")
+            st.success(f"🎯 **Resized Output:** 960 x {optimal_height} px (JPEG)")
 
-            centering_y = st.slider("Vertical Alignment Shift (Top ↔ Bottom):", 0.0, 1.0, 0.5, 0.05)
-
-            auto_fit_img = ImageOps.fit(
-                img_input,
+            # High-quality Lanczos resampling without any cropping
+            auto_fit_img = img_input.resize(
                 (960, optimal_height),
-                method=Image.Resampling.LANCZOS,
-                centering=(0.5, centering_y)
+                resample=Image.Resampling.LANCZOS
             )
 
         with col_preview:
-            st.image(auto_fit_img, caption=f"Auto-Fit Result: 960 x {optimal_height} px", use_container_width=True)
+            st.image(auto_fit_img, caption=f"Resized Result: 960 x {optimal_height} px", use_container_width=True)
 
             buf = io.BytesIO()
-            save_img = auto_fit_img.convert("RGB") if auto_fit_img.mode in ("RGBA", "P") else auto_fit_img
-            save_img.save(buf, format="JPEG", quality=95)
+            # Ensure proper conversion for JPEG format
+            if auto_fit_img.mode in ("RGBA", "P"):
+                save_img = Image.new("RGB", auto_fit_img.size, (255, 255, 255))
+                save_img.paste(auto_fit_img, mask=auto_fit_img.split()[3] if auto_fit_img.mode == "RGBA" else None)
+            else:
+                save_img = auto_fit_img.convert("RGB")
+
+            save_img.save(buf, format="JPEG", quality=95, subsampling=0)
             
             st.download_button(
-                label=f"📥 Download Auto-Fit Image (960 x {optimal_height} px)",
+                label=f"📥 Download 960 x {optimal_height} px JPEG Image",
                 data=buf.getvalue(),
-                file_name=f"autofit_960x{optimal_height}.jpg",
+                file_name=f"resized_960x{optimal_height}.jpg",
                 mime="image/jpeg",
                 type="primary",
                 use_container_width=True
             )
 
     # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH (960px x 300-500px RESIZING)
+    # MODE 2: WHITE ERASER BRUSH (NO CROP, JPEG EXPORT)
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
-        st.caption("Paint directly over the image. The downloaded result will automatically export at 960px width (height between 300px and 500px).")
+        st.caption("Paint directly over the image. Exported in full un-cropped resolution at 960px width in JPEG format.")
 
         orig_w, orig_h = img_input.size
         orig_aspect_ratio = orig_w / float(orig_h)
         ideal_height = 960 / orig_aspect_ratio
         optimal_height = int(max(300, min(500, round(ideal_height))))
 
-        export_base_img = ImageOps.fit(
-            img_input,
+        # Resize full image to 960px width without cropping
+        export_base_img = img_input.resize(
             (960, optimal_height),
-            method=Image.Resampling.LANCZOS,
-            centering=(0.5, 0.5)
+            resample=Image.Resampling.LANCZOS
         )
 
         e_col1, e_col2 = st.columns([1.2, 1])
@@ -253,7 +262,7 @@ if img_input is not None:
                     <canvas id="exportCanvas" width="960" height="{optimal_height}" style="display:none;"></canvas>
                 </div>
                 <div class="btn-container">
-                    <button id="downloadBtn">📥 Download 960x{optimal_height}px Image</button>
+                    <button id="downloadBtn">📥 Download 960x{optimal_height}px JPEG Image</button>
                     <button id="clearBtn" class="clear">🔄 Reset Canvas</button>
                 </div>
 
@@ -358,8 +367,9 @@ if img_input is not None:
 
                     document.getElementById('downloadBtn').onclick = () => {{
                         const link = document.createElement('a');
-                        link.download = 'erased_960x{optimal_height}.png';
-                        link.href = exportCanvas.toDataURL('image/png');
+                        link.download = 'erased_960x{optimal_height}.jpg';
+                        // Export strictly in JPEG format at max quality (0.95)
+                        link.href = exportCanvas.toDataURL('image/jpeg', 0.95);
                         link.click();
                     }};
                 </script>
@@ -373,6 +383,7 @@ if img_input is not None:
             st.subheader("📐 Target Specifications")
             st.info(f"""
             - **Width:** `960px` (Fixed)
-            - **Height:** `{optimal_height}px` (Auto-calculated between 300px–500px based on aspect ratio)
+            - **Height:** `{optimal_height}px` (Scaled without cropping)
+            - **Export Format:** `.jpg` / `JPEG` (Highest Quality)
             """)
-            st.success("✨ Your brush strokes on the left are dynamically scaled so that the downloaded image is crisp, un-stretched, and in the exact `960px` target resolution!")
+            st.success("✨ High-quality LANCZOS anti-aliasing preserves details without cropping top or bottom edges!")
