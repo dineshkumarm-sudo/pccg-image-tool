@@ -47,7 +47,6 @@ st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit 
 # Helper function to convert PIL Image to Base64 Data URL (JPEG format)
 def image_to_base64_url(img):
     buffered = io.BytesIO()
-    # Convert RGBA/P mode to RGB before saving as JPEG
     if img.mode in ("RGBA", "P"):
         rgb_img = Image.new("RGB", img.size, (255, 255, 255))
         rgb_img.paste(img, mask=img.split()[3] if img.mode == "RGBA" else None)
@@ -58,11 +57,43 @@ def image_to_base64_url(img):
     img_str = base64.b64encode(buffered.getvalue()).decode()
     return f"data:image/jpeg;base64,{img_str}"
 
+# Helper function to resize without warping (Proportional Scaling + Padding)
+def fit_image_without_distortion(img, target_width=960, min_height=300, max_height=500, bg_color=(255, 255, 255)):
+    orig_w, orig_h = img.size
+    aspect_ratio = orig_w / float(orig_h)
+
+    # Calculate proportional height when width is fixed to 960px
+    scaled_h = int(round(target_width / aspect_ratio))
+
+    # Clamp height between min_height and max_height bounds
+    canvas_h = max(min_height, min(max_height, scaled_h))
+
+    # Calculate scaled dimensions that preserve aspect ratio without exceeding target bounds
+    scale = min(target_width / orig_w, canvas_h / orig_h)
+    new_w = int(round(orig_w * scale))
+    new_h = int(round(orig_h * scale))
+
+    # Resize image preserving ratio with LANCZOS
+    resized_img = img.resize((new_w, new_h), resample=Image.Resampling.LANCZOS)
+
+    # Create solid background canvas
+    canvas = Image.new("RGB", (target_width, canvas_h), bg_color)
+
+    # Center the resized image on the canvas
+    offset_x = (target_width - new_w) // 2
+    offset_y = (canvas_h - new_h) // 2
+
+    if resized_img.mode == "RGBA":
+        canvas.paste(resized_img, (offset_x, offset_y), mask=resized_img.split()[3])
+    else:
+        canvas.paste(resized_img, (offset_x, offset_y))
+
+    return canvas, canvas_h
+
 # Helper function to load image from URL or Base64 String
 def load_image_from_input(pasted_str):
     pasted_str = pasted_str.strip()
     
-    # Base64 Data URL
     if pasted_str.startswith("data:image"):
         try:
             base64_str = pasted_str.split(",")[1]
@@ -72,7 +103,6 @@ def load_image_from_input(pasted_str):
             st.error(f"Error decoding Base64 image: {e}")
             return None
             
-    # Web URL (http/https)
     elif pasted_str.startswith("http://") or pasted_str.startswith("https://"):
         try:
             from urllib.parse import urlparse
@@ -80,16 +110,9 @@ def load_image_from_input(pasted_str):
             domain_referer = f"{parsed_url.scheme}://{parsed_url.netloc}/"
 
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
                 'Referer': domain_referer,
-                'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-                'Sec-Ch-Ua-Mobile': '?0',
-                'Sec-Ch-Ua-Platform': '"Windows"',
-                'Sec-Fetch-Dest': 'image',
-                'Sec-Fetch-Mode': 'no-cors',
-                'Sec-Fetch-Site': 'cross-site',
             }
             
             session = requests.Session()
@@ -98,9 +121,6 @@ def load_image_from_input(pasted_str):
             
             return Image.open(io.BytesIO(response.content))
             
-        except requests.exceptions.HTTPError as err:
-            st.error(f"Failed to fetch image from URL: {err}")
-            return None
         except Exception as e:
             st.error(f"Error fetching image: {e}")
             return None
@@ -115,10 +135,9 @@ tab1, tab2, tab3 = st.tabs(["📋 Paste Direct Image (Clipboard)", "📁 File Up
 
 img_input = None
 
-# TAB 1: Direct Clipboard Image Pasting
 with tab1:
     if PASTE_BUTTON_AVAILABLE:
-        st.write("Copy an image from anywhere (Right-Click → Copy Image or PrintScreen) and click the button below:")
+        st.write("Copy an image from anywhere (Right-Click → Copy Image or PrintScreen) and click below:")
         paste_result = pbutton(
             label="📋 Paste Image from Clipboard",
             text_color="#0F172A",
@@ -129,99 +148,76 @@ with tab1:
         if paste_result.image_data is not None:
             img_input = paste_result.image_data
     else:
-        st.warning("The `streamlit-paste-button` library is installing. Please refresh the page in a few seconds once Streamlit finishes updating.")
+        st.warning("The `streamlit-paste-button` library is installing. Please refresh in a few seconds.")
 
-# TAB 2: File Upload
 with tab2:
     uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp"])
     if uploaded_file:
         img_input = Image.open(uploaded_file)
 
-# TAB 3: Text Input (URL or Base64)
 with tab3:
-    pasted_data = st.text_input(
-        "Paste Image URL or Base64 Data here:", 
-        key="clipboard_text_input", 
-        placeholder="https://example.com/image.jpg or data:image/png;base64,...",
-        help="Paste a direct image link or copied base64 string."
-    )
+    pasted_data = st.text_input("Paste Image URL or Base64 Data here:", key="clipboard_text_input")
     if pasted_data:
         img_input = load_image_from_input(pasted_data)
 
 if img_input is not None:
     st.markdown("---")
     
+    bg_choice = st.radio(
+        "🎨 Background Padding Color (for aspect ratio matching):", 
+        ["White", "Black"], 
+        horizontal=True
+    )
+    padding_color = (255, 255, 255) if bg_choice == "White" else (0, 0, 0)
+
     mode = st.radio(
         "🛠️ Choose Processing Tool:", 
-        [
-            "⚡ 1-Click Auto-Fit (960px x 300-500px)", 
-            "🧹 White Eraser Brush"
-        ], 
+        ["⚡ 1-Click Auto-Fit (No Distortion)", "🧹 White Eraser Brush"], 
         horizontal=True
     )
 
     # -------------------------------------------------------------
-    # MODE 1: 1-CLICK AUTO-FIT MODE (NO CROP, HIGH QUALITY RESIZE)
+    # MODE 1: AUTO-FIT MODE (NO WARP, NO CROP)
     # -------------------------------------------------------------
     if "1-Click Auto-Fit" in mode:
-        st.subheader("⚡ 1-Click Auto-Fit Stretch/Resize (No Cropping)")
-        st.caption("Resizes the entire image to 960px width with an optimal height (300px–500px). Zero cropping guaranteed!")
+        st.subheader("⚡ Un-warped Auto-Fit")
+        st.caption("Preserves 100% of original image proportions centered on a 960px canvas without stretching or cropping.")
         
         col_controls, col_preview = st.columns([1, 1.2])
 
         orig_w, orig_h = img_input.size
-        orig_aspect_ratio = orig_w / float(orig_h)
-        ideal_height = 960 / orig_aspect_ratio
-        optimal_height = int(max(300, min(500, round(ideal_height))))
+        auto_fit_img, final_h = fit_image_without_distortion(
+            img_input, target_width=960, min_height=300, max_height=500, bg_color=padding_color
+        )
 
         with col_controls:
             st.info(f"📏 **Original Size:** {orig_w} x {orig_h} px")
-            st.success(f"🎯 **Resized Output:** 960 x {optimal_height} px (JPEG)")
-
-            # High-quality Lanczos resampling without any cropping
-            auto_fit_img = img_input.resize(
-                (960, optimal_height),
-                resample=Image.Resampling.LANCZOS
-            )
+            st.success(f"🎯 **Canvas Size:** 960 x {final_h} px (JPEG)")
 
         with col_preview:
-            st.image(auto_fit_img, caption=f"Resized Result: 960 x {optimal_height} px", use_container_width=True)
+            st.image(auto_fit_img, caption=f"Un-warped Output: 960 x {final_h} px", use_container_width=True)
 
             buf = io.BytesIO()
-            # Ensure proper conversion for JPEG format
-            if auto_fit_img.mode in ("RGBA", "P"):
-                save_img = Image.new("RGB", auto_fit_img.size, (255, 255, 255))
-                save_img.paste(auto_fit_img, mask=auto_fit_img.split()[3] if auto_fit_img.mode == "RGBA" else None)
-            else:
-                save_img = auto_fit_img.convert("RGB")
-
-            save_img.save(buf, format="JPEG", quality=95, subsampling=0)
+            auto_fit_img.save(buf, format="JPEG", quality=95, subsampling=0)
             
             st.download_button(
-                label=f"📥 Download 960 x {optimal_height} px JPEG Image",
+                label=f"📥 Download 960 x {final_h} px JPEG Image",
                 data=buf.getvalue(),
-                file_name=f"resized_960x{optimal_height}.jpg",
+                file_name=f"unwarped_960x{final_h}.jpg",
                 mime="image/jpeg",
                 type="primary",
                 use_container_width=True
             )
 
     # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH (NO CROP, JPEG EXPORT)
+    # MODE 2: WHITE ERASER BRUSH (NO WARP)
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
-        st.caption("Paint directly over the image. Exported in full un-cropped resolution at 960px width in JPEG format.")
+        st.caption("Paint directly over the un-warped image. Exports directly as 960px JPEG.")
 
-        orig_w, orig_h = img_input.size
-        orig_aspect_ratio = orig_w / float(orig_h)
-        ideal_height = 960 / orig_aspect_ratio
-        optimal_height = int(max(300, min(500, round(ideal_height))))
-
-        # Resize full image to 960px width without cropping
-        export_base_img = img_input.resize(
-            (960, optimal_height),
-            resample=Image.Resampling.LANCZOS
+        export_base_img, final_h = fit_image_without_distortion(
+            img_input, target_width=960, min_height=300, max_height=500, bg_color=padding_color
         )
 
         e_col1, e_col2 = st.columns([1.2, 1])
@@ -231,7 +227,7 @@ if img_input is not None:
 
             canvas_width = 700
             scale_ratio = canvas_width / 960.0
-            canvas_height = int(optimal_height * scale_ratio)
+            canvas_height = int(final_h * scale_ratio)
             
             resized_for_canvas = export_base_img.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
             
@@ -259,17 +255,16 @@ if img_input is not None:
             <body>
                 <div id="canvas-container">
                     <canvas id="eraserCanvas" width="{canvas_width}" height="{canvas_height}"></canvas>
-                    <canvas id="exportCanvas" width="960" height="{optimal_height}" style="display:none;"></canvas>
+                    <canvas id="exportCanvas" width="960" height="{final_h}" style="display:none;"></canvas>
                 </div>
                 <div class="btn-container">
-                    <button id="downloadBtn">📥 Download 960x{optimal_height}px JPEG Image</button>
+                    <button id="downloadBtn">📥 Download 960x{final_h}px JPEG Image</button>
                     <button id="clearBtn" class="clear">🔄 Reset Canvas</button>
                 </div>
 
                 <script>
                     const displayCanvas = document.getElementById('eraserCanvas');
                     const displayCtx = displayCanvas.getContext('2d');
-                    
                     const exportCanvas = document.getElementById('exportCanvas');
                     const exportCtx = exportCanvas.getContext('2d');
 
@@ -285,20 +280,12 @@ if img_input is not None:
 
                     let lastPos = null;
 
-                    displayImg.onload = () => {{
-                        displayCtx.drawImage(displayImg, 0, 0, {canvas_width}, {canvas_height});
-                    }};
-
-                    exportImg.onload = () => {{
-                        exportCtx.drawImage(exportImg, 0, 0, 960, {optimal_height});
-                    }};
+                    displayImg.onload = () => {{ displayCtx.drawImage(displayImg, 0, 0, {canvas_width}, {canvas_height}); }};
+                    exportImg.onload = () => {{ exportCtx.drawImage(exportImg, 0, 0, 960, {final_h}); }};
 
                     function getPos(e) {{
                         const rect = displayCanvas.getBoundingClientRect();
-                        return {{
-                            x: e.clientX - rect.left,
-                            y: e.clientY - rect.top
-                        }};
+                        return {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
                     }}
 
                     function startDrawing(e) {{
@@ -325,11 +312,8 @@ if img_input is not None:
                         displayCtx.strokeStyle = '#FFFFFF';
 
                         displayCtx.beginPath();
-                        if (lastPos) {{
-                            displayCtx.moveTo(lastPos.x, lastPos.y);
-                        }} else {{
-                            displayCtx.moveTo(pos.x, pos.y);
-                        }}
+                        if (lastPos) displayCtx.moveTo(lastPos.x, lastPos.y);
+                        else displayCtx.moveTo(pos.x, pos.y);
                         displayCtx.lineTo(pos.x, pos.y);
                         displayCtx.stroke();
 
@@ -360,15 +344,13 @@ if img_input is not None:
                     document.getElementById('clearBtn').onclick = () => {{
                         displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
                         displayCtx.drawImage(displayImg, 0, 0, {canvas_width}, {canvas_height});
-
                         exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
-                        exportCtx.drawImage(exportImg, 0, 0, 960, {optimal_height});
+                        exportCtx.drawImage(exportImg, 0, 0, 960, {final_h});
                     }};
 
                     document.getElementById('downloadBtn').onclick = () => {{
                         const link = document.createElement('a');
-                        link.download = 'erased_960x{optimal_height}.jpg';
-                        // Export strictly in JPEG format at max quality (0.95)
+                        link.download = 'erased_960x{final_h}.jpg';
                         link.href = exportCanvas.toDataURL('image/jpeg', 0.95);
                         link.click();
                     }};
@@ -383,7 +365,7 @@ if img_input is not None:
             st.subheader("📐 Target Specifications")
             st.info(f"""
             - **Width:** `960px` (Fixed)
-            - **Height:** `{optimal_height}px` (Scaled without cropping)
-            - **Export Format:** `.jpg` / `JPEG` (Highest Quality)
+            - **Height:** `{final_h}px`
+            - **Proportions:** 100% Original (No Warping, No Cropping)
+            - **Format:** `.jpg` / `JPEG`
             """)
-            st.success("✨ High-quality LANCZOS anti-aliasing preserves details without cropping top or bottom edges!")
