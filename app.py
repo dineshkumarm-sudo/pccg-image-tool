@@ -37,8 +37,8 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
 
-# Helper function to convert PIL Image to Base64 (Bypasses Streamlit's missing image_to_url)
-def image_to_base64(img):
+# Helper function to convert PIL Image to Base64 Data URL
+def image_to_base64_url(img):
     buffered = io.BytesIO()
     img.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
@@ -145,7 +145,7 @@ if img_input is not None:
             )
 
     # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH (FIXED)
+    # MODE 2: WHITE ERASER BRUSH (CRASH-PROOF FIX)
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
@@ -161,16 +161,16 @@ if img_input is not None:
             h_size = int((float(img_input.size[1]) * float(w_percent)))
             resized_for_canvas = img_input.resize((canvas_width, h_size), Image.Resampling.LANCZOS)
 
-            # CRITICAL FIX: Convert PIL image to PIL-Image wrapped in base64 string
-            # to avoid calling st_image.image_to_url internal function
-            bg_base64 = image_to_base64(resized_for_canvas)
+            # Generate Base64 Data URL string
+            bg_data_url = image_to_base64_url(resized_for_canvas)
 
-            # Pass background_image as a converted PIL image safely
+            # BYPASS BUG: Pass background_image=None and use background_image_url with Base64 string
             canvas_result = st_canvas(
                 fill_color="rgba(255, 255, 255, 1.0)",
                 stroke_width=eraser_size,
                 stroke_color="#FFFFFF",
-                background_image=Image.open(io.BytesIO(base64.b64decode(bg_base64.split(",")[1]))),
+                background_image=None,
+                background_image_url=bg_data_url,
                 update_streamlit=True,
                 height=h_size,
                 width=canvas_width,
