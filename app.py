@@ -37,13 +37,6 @@ st.markdown("""
 
 st.markdown('<h1 class="main-title">✂️ Custom 960px Image Eraser & Auto-Fit Tool</h1>', unsafe_allow_html=True)
 
-# Helper function to convert PIL Image to Base64 Data URL
-def image_to_base64_url(img):
-    buffered = io.BytesIO()
-    img.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
-
 # Helper function to load image from URL or Base64
 def load_image_from_input(pasted_str):
     pasted_str = pasted_str.strip()
@@ -145,11 +138,11 @@ if img_input is not None:
             )
 
     # -------------------------------------------------------------
-    # MODE 2: WHITE ERASER BRUSH (CRASH-PROOF FIX)
+    # MODE 2: WHITE ERASER BRUSH (NO BACKGROUND BUG)
     # -------------------------------------------------------------
     else:
         st.subheader("🧹 White Eraser Tool")
-        st.caption("Paint over unwanted regions using the white brush. Adjust brush size using the slider.")
+        st.caption("Draw white brush strokes on the canvas pad below to erase/cover areas on your image.")
 
         e_col1, e_col2 = st.columns([1.2, 1])
 
@@ -161,28 +154,30 @@ if img_input is not None:
             h_size = int((float(img_input.size[1]) * float(w_percent)))
             resized_for_canvas = img_input.resize((canvas_width, h_size), Image.Resampling.LANCZOS)
 
-            # Generate Base64 Data URL string
-            bg_data_url = image_to_base64_url(resized_for_canvas)
+            # Display Reference Image above drawing pad
+            st.image(resized_for_canvas, caption="Reference Image for Drawing", use_container_width=True)
 
-            # BYPASS BUG: Pass background_image=None and use background_image_url with Base64 string
+            # CRASH-PROOF: Do NOT pass background_image or background_image_url to st_canvas
             canvas_result = st_canvas(
                 fill_color="rgba(255, 255, 255, 1.0)",
                 stroke_width=eraser_size,
                 stroke_color="#FFFFFF",
-                background_image=None,
-                background_image_url=bg_data_url,
+                background_color="#000000",
                 update_streamlit=True,
                 height=h_size,
                 width=canvas_width,
                 drawing_mode="freedraw",
-                key="white_eraser_canvas",
+                key="white_eraser_canvas_clean",
             )
 
         with e_col2:
             st.subheader("🖼️ Output Image")
             if canvas_result.image_data is not None:
+                # Extract white strokes drawn on the canvas
                 canvas_img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
                 base_img = resized_for_canvas.convert("RGBA")
+                
+                # Combine original image with painted white strokes
                 erased_final = Image.alpha_composite(base_img, canvas_img)
 
                 st.image(erased_final, caption="Erased Output Preview", use_container_width=True)
