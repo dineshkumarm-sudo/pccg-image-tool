@@ -5,6 +5,13 @@ import base64
 import requests
 import streamlit.components.v1 as components
 
+# Import Clipboard Paste Button
+try:
+    from streamlit_paste_button import paste_image_button as pbutton
+    PASTE_BUTTON_AVAILABLE = True
+except ImportError:
+    PASTE_BUTTON_AVAILABLE = False
+
 # 1. Page Configuration
 st.set_page_config(
     page_title="Vizard Custom Image Processor",
@@ -44,11 +51,11 @@ def image_to_base64_url(img):
     img_str = base64.b64encode(buffered.getvalue()).decode()
     return f"data:image/png;base64,{img_str}"
 
-# Helper function to load image from URL or Base64 (Updated with Anti-403 Headers)
+# Helper function to load image from URL or Base64 String
 def load_image_from_input(pasted_str):
     pasted_str = pasted_str.strip()
     
-    # 1. Base64 Data URL
+    # Base64 Data URL
     if pasted_str.startswith("data:image"):
         try:
             base64_str = pasted_str.split(",")[1]
@@ -58,15 +65,13 @@ def load_image_from_input(pasted_str):
             st.error(f"Error decoding Base64 image: {e}")
             return None
             
-    # 2. Web URL (http/https)
+    # Web URL (http/https)
     elif pasted_str.startswith("http://") or pasted_str.startswith("https://"):
         try:
-            # Extract base domain dynamically to use as Referer
             from urllib.parse import urlparse
             parsed_url = urlparse(pasted_str)
             domain_referer = f"{parsed_url.scheme}://{parsed_url.netloc}/"
 
-            # Full modern browser headers to bypass CDN / 403 blocks
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
@@ -88,7 +93,6 @@ def load_image_from_input(pasted_str):
             
         except requests.exceptions.HTTPError as err:
             st.error(f"Failed to fetch image from URL: {err}")
-            st.info("💡 **Tip:** If a site actively blocks direct requests, try downloading the image locally and uploading via the **📁 File Upload** tab, or copy & paste its Base64 code.")
             return None
         except Exception as e:
             st.error(f"Error fetching image: {e}")
@@ -100,23 +104,40 @@ def load_image_from_input(pasted_str):
 
 # 2. Input Source Selection
 st.subheader("1. Select Image Input Method")
-tab1, tab2 = st.tabs(["📁 File Upload", "📋 Paste URL / Clipboard"])
+tab1, tab2, tab3 = st.tabs(["📋 Paste Direct Image (Clipboard)", "📁 File Upload", "🔗 URL / Base64 Text"])
 
 img_input = None
 
+# TAB 1: Direct Clipboard Image Pasting
 with tab1:
+    if PASTE_BUTTON_AVAILABLE:
+        st.write("Copy an image from anywhere (Right-Click → Copy Image or PrintScreen) and click the button below:")
+        paste_result = pbutton(
+            label="📋 Paste Image from Clipboard",
+            text_color="#0F172A",
+            background_color="#38BDF8",
+            hover_background_color="#0284C7",
+            errors="raise"
+        )
+        if paste_result.image_data is not None:
+            img_input = paste_result.image_data
+    else:
+        st.warning("The `streamlit-paste-button` library is installing. Please refresh the page in a few seconds once Streamlit finishes updating.")
+
+# TAB 2: File Upload
+with tab2:
     uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp"])
     if uploaded_file:
         img_input = Image.open(uploaded_file)
 
-with tab2:
+# TAB 3: Text Input (URL or Base64)
+with tab3:
     pasted_data = st.text_input(
         "Paste Image URL or Base64 Data here:", 
         key="clipboard_text_input", 
         placeholder="https://example.com/image.jpg or data:image/png;base64,...",
         help="Paste a direct image link or copied base64 string."
     )
-    
     if pasted_data:
         img_input = load_image_from_input(pasted_data)
 
@@ -182,7 +203,6 @@ if img_input is not None:
         st.subheader("🧹 White Eraser Tool")
         st.caption("Paint directly over the image. The downloaded result will automatically export at 960px width (height between 300px and 500px).")
 
-        # 1. First, automatically crop/fit the image to 960px x optimal_height
         orig_w, orig_h = img_input.size
         orig_aspect_ratio = orig_w / float(orig_h)
         ideal_height = 960 / orig_aspect_ratio
@@ -200,18 +220,15 @@ if img_input is not None:
         with e_col1:
             eraser_size = st.slider("White Eraser Brush Size (px):", min_value=5, max_value=100, value=25, step=5)
 
-            # Interactive Display Canvas dimensions
             canvas_width = 700
             scale_ratio = canvas_width / 960.0
             canvas_height = int(optimal_height * scale_ratio)
             
             resized_for_canvas = export_base_img.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
             
-            # Base64 data for both display canvas and full 960px export canvas
             bg_data_url_display = image_to_base64_url(resized_for_canvas)
             bg_data_url_export = image_to_base64_url(export_base_img)
 
-            # HTML5 Dual Canvas (Display Canvas + Hidden 960px Export Canvas)
             html_code = f"""
             <!DOCTYPE html>
             <html>
@@ -233,7 +250,6 @@ if img_input is not None:
             <body>
                 <div id="canvas-container">
                     <canvas id="eraserCanvas" width="{canvas_width}" height="{canvas_height}"></canvas>
-                    <!-- Hidden Full-Res 960px Canvas -->
                     <canvas id="exportCanvas" width="960" height="{optimal_height}" style="display:none;"></canvas>
                 </div>
                 <div class="btn-container">
@@ -256,7 +272,6 @@ if img_input is not None:
 
                     let isDrawing = false;
                     let displayBrushSize = {eraser_size};
-                    // Scale brush size proportionally for 960px resolution
                     let exportBrushSize = {eraser_size} * (960 / {canvas_width});
 
                     let lastPos = null;
@@ -295,7 +310,6 @@ if img_input is not None:
                         if (!isDrawing) return;
                         const pos = getPos(e);
 
-                        // Draw on Display Canvas
                         displayCtx.lineWidth = displayBrushSize;
                         displayCtx.lineCap = 'round';
                         displayCtx.lineJoin = 'round';
@@ -310,7 +324,6 @@ if img_input is not None:
                         displayCtx.lineTo(pos.x, pos.y);
                         displayCtx.stroke();
 
-                        // Sync to 960px Export Canvas
                         const scale = 960 / {canvas_width};
                         const expX = pos.x * scale;
                         const expY = pos.y * scale;
